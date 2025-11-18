@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <!-- Favicon e íconos -->
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
+
+  <!-- MANIFEST (solo 1, este es el correcto) -->
+  <link rel="manifest" href="site.webmanifest">
+
+  <!-- Colores -->
+  <meta name="msapplication-TileColor" content="#2d89ef">
+  <meta name="theme-color" content="#1e88e5">
+
+  <!-- Básico -->
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Impostor</title>
+
+  <!-- Registro del Service Worker -->
+  <script src="sw-register.js"></script>
+
+  <!-- Estilos -->
+  <style>
+    :root{ --accent:#1e88e5; --muted:#666; }
+    html,body{height:100%;margin:0;font-family:Arial,Helvetica,sans-serif;background:#f5f6f8}
+    .wrap{max-width:760px;margin:18px auto;padding:18px}
+    h1{text-align:center;margin:0 0 12px}
+    .card{background:#fff;padding:14px;border-radius:12px;box-shadow:0 6px 18px rgba(0,0,0,0.06);margin-bottom:14px}
+    .block{display:block;margin-bottom:10px;font-weight:600}
+    .big-select, .big-input { width:100%; font-size:1.4rem; padding:12px; border-radius:10px; border:1px solid #ddd; box-sizing:border-box; margin-bottom:12px; }
+    .categories { font-size:1.05rem; line-height:1.6; margin-bottom:12px; }
+    .btn { display:block; width:100%; padding:14px; font-size:1.1rem; background:var(--accent); color:#fff; border:0; border-radius:10px; cursor:pointer }
+    .btn:active { transform:scale(.99); }
+    .players-list { display:flex; flex-direction:column; gap:10px; margin-top:12px; }
+    .player-row { display:flex; gap:8px; align-items:center; }
+    .player-row input[type="text"]{ flex:1; padding:10px; font-size:1.05rem; border-radius:8px; border:1px solid #ddd }
+    .word-btn { padding:10px 12px; font-size:1.02rem; border-radius:8px; border:2px solid var(--accent); background:#fff; cursor:pointer }
+    .word-btn:active{ transform:scale(.97); }
+    #wordCard { margin:12px auto; padding:14px; width:95%; max-width:420px; text-align:center; font-size:1.45rem; border-radius:10px; border:2px solid #222; background:#fff; display:none; }
+    .votes { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+    .vote-btn { padding:10px 12px; border-radius:8px; border:2px solid #444; background:#fff; cursor:pointer; }
+    .vote-btn:active{ transform:scale(.97); }
+    .muted{ color:var(--muted); font-size:0.95rem; margin-top:8px; }
+    @media (max-width:420px){ .big-select,.big-input{ font-size:1.6rem; padding:16px } .word-btn{ font-size:1.12rem; padding:12px 14px } .player-row input[type="text"]{ font-size:1.1rem; padding:12px } }
+  </style>
+</head>
+
+
+
+<body>
+  <div class="wrap">
+    <h1>¿Quién es el Impostor?</h1>
+
+    <!-- SETUP -->
+    <div class="card" id="setupCard">
+      <label class="block">Seleccioná categorías</label>
+      <div class="categories" id="categoriesBlock">
+        <label><input type="checkbox" value="animales"> Animales</label><br>
+        <label><input type="checkbox" value="comidas"> Comidas</label><br>
+        <label><input type="checkbox" value="objetos"> Objetos</label><br>
+        <label><input type="checkbox" value="videojuegos"> Videojuegos</label><br>
+        <label><input type="checkbox" value="trabajos"> Trabajos / Oficios</label><br>
+        <label><input type="checkbox" value="paises"> Países</label><br>
+        <label><input type="checkbox" value="deportes"> Deportes</label><br>
+        <label><input type="checkbox" value="escuela"> Escuela</label><br>
+        <label><input type="checkbox" value="personalizado"> Personalizado</label>
+      </div>
+
+      <label class="block">Cantidad de jugadores</label>
+      <select id="playersSelect" class="big-select" aria-label="Cantidad de jugadores"></select>
+
+      <label class="block">Cantidad de impostores</label>
+      <select id="impostorsSelect" class="big-select" aria-label="Cantidad de impostores"></select>
+
+      <label class="block">Modo del impostor</label>
+      <select id="impostorMode" class="big-select">
+        <option value="question">Palabra "?"</option>
+        <option value="similar">Palabra distinta pero relacionada</option>
+      </select>
+
+      <button id="startBtn" class="btn">Iniciar partida</button>
+      <div class="muted">En celular: tocá los selects grandes para elegir fácilmente.</div>
+    </div>
+
+    <!-- PLAY -->
+    <div class="card" id="playCard" style="display:none;">
+      <div class="muted">Ronda <span id="roundNumber">0</span></div>
+
+      <div id="playersContainer" class="players-list"></div>
+
+      <div id="wordCard"></div>
+
+      <div style="margin-top:12px">
+        <div class="muted">Votar al impostor</div>
+        <div id="votesArea" class="votes"></div>
+        <div id="voteResult" class="muted"></div>
+      </div>
+
+      <div style="margin-top:12px">
+        <button id="nextRoundBtn" class="btn" style="display:none">Siguiente ronda</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+/* ---------- WORD POOLS ---------- */
+const WORD_SETS = {
+  animales: ["gato","perro","elefante","zorro","loro","vaca","caballo","tortuga","mono","pato","oso","jirafa","conejo","raton","delfin"],
+  comidas: ["pizza","asado","empanada","hamburguesa","pancho","arroz","fideos","sushi","milanesa","helado","torta","arepa","choripan","locro","tarta"],
+  objetos: ["mesa","silla","celular","televisor","ventilador","lapicera","cuchillo","cama","puerta","mochila","reloj","teclado","auriculares","bolso","bateria"],
+  videojuegos: ["lol","pvz","csgo","genshin impact","clash royale","minecraft","fortnite","roblox","gta v","fifa","elden ring","halo","valorant","pubg","brawl stars"],
+  trabajos: ["doctor","bombero","policia","profesor","albanil","plomero","electricista","ingeniero","carpintero","panadero","cajero","taxista","mecanico"],
+  paises: ["argentina","brasil","chile","uruguay","paraguay","bolivia","peru","mexico","espana","italia","francia","alemania","japon"],
+  deportes: ["futbol","basquet","tenis","voley","natacion","hockey","rugby","handball","boxeo","ciclismo","golf"],
+  escuela: ["pizarron","tiza","carpeta","cuaderno","mochila","recreo","profesor","banco","regla","proyector"],
+  personalizado: []
+};
+
+/* ---------- GAME STATE ---------- */
+let playersCount = 4, impostorsCount = 1, impostorMode = "question";
+let players = [];
+let roles = [];
+let poolWords = [];
+let lastWords = [];
+let lastImpostors = [];
+let roundNum = 0;
+let currentTurn = 0;
+let roundMainWord = "";
+let currentCategoryOfMain = ""; // guardamos categoría de la palabra principal
+
+/* ---------- UI refs ---------- */
+const playersSelect = document.getElementById("playersSelect");
+const impostorsSelect = document.getElementById("impostorsSelect");
+const startBtn = document.getElementById("startBtn");
+const playCard = document.getElementById("playCard");
+const setupCard = document.getElementById("setupCard");
+const playersContainer = document.getElementById("playersContainer");
+const wordCard = document.getElementById("wordCard");
+const votesArea = document.getElementById("votesArea");
+const voteResult = document.getElementById("voteResult");
+const nextRoundBtn = document.getElementById("nextRoundBtn");
+const roundNumberSpan = document.getElementById("roundNumber");
+
+/* ---------- fill selects ---------- */
+function fillSelects(){
+  playersSelect.innerHTML = "";
+  for(let i=3;i<=12;i++){
+    const o=document.createElement("option"); o.value=i; o.textContent=i;
+    if(i===4) o.selected=true;
+    playersSelect.appendChild(o);
+  }
+  impostorsSelect.innerHTML = "";
+  for(let j=1;j<=4;j++){ const o=document.createElement("option"); o.value=j; o.textContent=j; impostorsSelect.appendChild(o); }
+}
+fillSelects();
+
+/* ---------- Utils ---------- */
+function pickFrom(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
+function escapeHtml(s){ return String(s).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;"); }
+function flash(el,txt){ const orig=el.textContent; el.textContent=txt; el.style.opacity=.6; setTimeout(()=>{ el.textContent=orig; el.style.opacity=""; },900); }
+
+/* ---------- Random no repetir palabra 5 rondas ---------- */
+function pickMainWord(){
+  if(poolWords.length===0) return "";
+  let tries=0, w;
+  do{
+    w = pickFrom(poolWords);
+    tries++;
+    if(tries>80) break;
+  } while(lastWords.includes(w));
+  lastWords.push(w);
+  if(lastWords.length>5) lastWords.shift();
+  // además guardamos categoría del main para usarla al generar la relacionada
+  currentCategoryOfMain = findCategoryOfWord(w);
+  return w;
+}
+
+/* ---------- Encontrar categoría que contiene una palabra (case-insensitive) ---------- */
+function findCategoryOfWord(word){
+  if(!word) return "";
+  const lw = String(word).toLowerCase();
+  for(const cat in WORD_SETS){
+    if(WORD_SETS[cat].some(w => String(w).toLowerCase() === lw)) return cat;
+  }
+  return "";
+}
+
+/* ---------- Generador de palabra relacionada (opción 3: bastante distinta pero relacionada) ---------- */
+function generateRelatedWord(main){
+  if(!main) return main + " (rel)";
+  const key = String(main).toLowerCase();
+
+  // 1) mapa manual simple (si tenés entradas, úsalas)
+  const MANUAL = {
+    gato:"ratonero", perro:"lobo", elefante:"mamut", zorro:"coyote",
+    pizza:"italia", empanada:"masa", hamburguesa:"parrilla", minecraft:"terraria",
+    csgo:"valorant", fortnite:"apex", celular:"telefono", lapicera:"escritura",
+    argentina:"latinoamerica", brasil:"samba", futbol:"estadio", profesor:"clase",
+    cuaderno:"apuntes"
+  };
+  if(MANUAL[key] && String(MANUAL[key]).toLowerCase() !== key) return MANUAL[key];
+
+  // 2) si no hay manual, buscamos en la misma categoría una palabra diferente (mucho más distinta)
+  const cat = currentCategoryOfMain || findCategoryOfWord(main);
+  if(cat && Array.isArray(WORD_SETS[cat])){
+    const options = WORD_SETS[cat].filter(w => String(w).toLowerCase() !== key);
+    if(options.length > 0){
+      // elegimos una palabra aleatoria de la categoría distinta al main
+      let candidate = pickFrom(options);
+      // si por casualidad devuelve igual (sensible a mayúsculas), forzamos otro intento pequeño
+      let tries = 0;
+      while(String(candidate).toLowerCase() === key && tries < 6){
+        candidate = pickFrom(options);
+        tries++;
+      }
+      if(String(candidate).toLowerCase() !== key) return candidate;
+    }
+  }
+
+  // 3) si no hay categoría o no se pudo, elegimos otra palabra aleatoria del pool (excluyendo main)
+  const poolOptions = poolWords.filter(w => String(w).toLowerCase() !== key);
+  if(poolOptions.length > 0) return pickFrom(poolOptions);
+
+  // 4) fallback (si no hay alternativa): añadir sufijo que lo deje distinto
+  return main + " (relacionado)";
+}
+
+/* ---------- Elegir impostores sin repetir últimos 5 ---------- */
+function pickImpostorIndices(nPlayers, nImpostors){
+  const chosen=[];
+  let attempts=0;
+  while(chosen.length<nImpostors && attempts<300){
+    attempts++;
+    const cand = Math.floor(Math.random()*nPlayers);
+    if(chosen.includes(cand)) continue;
+    if(lastImpostors.includes(cand)) continue;
+    chosen.push(cand);
+  }
+  while(chosen.length<nImpostors){
+    const cand=Math.floor(Math.random()*nPlayers);
+    if(!chosen.includes(cand)) chosen.push(cand);
+  }
+  chosen.forEach(i=> lastImpostors.push(i));
+  while(lastImpostors.length>5) lastImpostors.shift();
+  return chosen;
+}
+
+/* ---------- Render players UI (inputs + Ver palabra) ---------- */
+function renderPlayers(){
+  playersContainer.innerHTML = "";
+  players.forEach((p, i) => {
+    const row = document.createElement("div");
+    row.className = "player-row";
+    const input = document.createElement("input");
+    input.type = "text";
+    input.value = p.name;
+    input.id = "name_" + i;
+    input.addEventListener("input", ()=> players[i].name = input.value.trim() || ("Jugador "+(i+1)));
+
+    const btn = document.createElement("button");
+    btn.className = "word-btn";
+    btn.textContent = "Ver palabra";
+    btn.onclick = ()=> handlePlayerClick(i, btn);
+
+    row.appendChild(input);
+    row.appendChild(btn);
+    playersContainer.appendChild(row);
+  });
+}
+
+/* ---------- Handle player button click: show/hide and advance ---------- */
+function handlePlayerClick(index, btn){
+  if(index !== currentTurn){
+    flash(btn, "No es tu turno");
+    return;
+  }
+  if(wordCard.style.display === "none" || wordCard.dataset.player !== String(index)){
+    const name = players[index].name || ("Jugador " + (index+1));
+    wordCard.innerHTML = `<strong>${escapeHtml(name)}</strong><div style="margin-top:8px; font-size:1.2rem;">${escapeHtml(roles[index])}</div>`;
+    wordCard.style.display = "block";
+    wordCard.dataset.player = String(index);
+    btn.style.transform = "scale(.97)"; setTimeout(()=> btn.style.transform = "", 150);
+  } else {
+    wordCard.style.display = "none";
+    wordCard.dataset.player = "";
+    currentTurn = (currentTurn + 1) % players.length;
+  }
+}
+
+/* ---------- render vote buttons ---------- */
+function renderVotes(){
+  votesArea.innerHTML = "";
+  players.forEach((p,i)=>{
+    const b = document.createElement("button");
+    b.className = "vote-btn";
+    b.textContent = p.name || ("Jugador "+(i+1));
+    b.onclick = ()=> handleVote(i);
+    votesArea.appendChild(b);
+  });
+  voteResult.innerHTML = "";
+}
+
+/* ---------- handle vote ---------- */
+function handleVote(i){
+  if(typeof roundMainWord === "undefined" || roundMainWord === "") { voteResult.innerHTML = "Error: ronda no inicializada"; return; }
+  if(roles[i] !== roundMainWord){
+    voteResult.innerHTML = `✔ <strong>${escapeHtml(players[i].name)}</strong> ERA el impostor. Ganaron.`;
+    nextRoundBtn.style.display = "inline-block";
+  } else {
+    voteResult.innerHTML = `❌ <strong>${escapeHtml(players[i].name)}</strong> NO era el impostor. El juego sigue...`;
+  }
+}
+
+/* ---------- NEXT ROUND / START ROUNDS ---------- */
+nextRoundBtn.addEventListener("click", ()=> {
+  startRound();
+});
+
+/* ---------- Start the whole match (from setup) ---------- */
+startBtn.addEventListener("click", ()=> {
+  playersCount = parseInt(playersSelect.value,10);
+  impostorsCount = parseInt(impostorsSelect.value,10);
+  impostorMode = document.getElementById("impostorMode").value;
+
+  const checked = [...document.querySelectorAll("#categoriesBlock input[type=checkbox]:checked")].map(i=>i.value);
+  if(checked.length === 0){ alert("Seleccioná al menos una categoría."); return; }
+
+  poolWords = [];
+  checked.forEach(cat => { if(Array.isArray(WORD_SETS[cat])) poolWords = poolWords.concat(WORD_SETS[cat]); });
+  if(poolWords.length === 0){ alert("Pool vacío. Revisá categorías."); return; }
+
+  players = [];
+  for(let i=0;i<playersCount;i++) players.push({ name: "Jugador "+(i+1) });
+
+  roundNum = 0; lastWords = lastWords || []; lastImpostors = lastImpostors || [];
+
+  setupCard.style.display = "none";
+  playCard.style.display = "block";
+
+  startRound();
+});
+
+/* ---------- startRound: creates mainWord, impostors, roles, UI ---------- */
+function startRound(){
+  roundNum++; roundNumberSpan.textContent = roundNum;
+
+  roundMainWord = pickMainWord();
+  if(!roundMainWord){ alert("No se pudo elegir palabra. Revisá pool."); return; }
+
+  const impostorIndices = pickImpostorIndices(players.length, Math.min(impostorsCount, players.length-1));
+
+  // asignar roles: por defecto todos reciben la mainWord
+  roles = Array(players.length).fill(roundMainWord);
+
+  // si modo 'similar' (opción B-> ahora implementada como "opción 3" pedida),
+  // generamos una palabra RELACIONADA pero bastante distinta automáticamente
+  if(document.getElementById("impostorMode").value === "similar"){
+    const related = generateRelatedWord(roundMainWord);
+    // si por alguna razón relacionado es igual, forzamos fallback distinto
+    let safeRelated = related;
+    if(String(safeRelated).toLowerCase() === String(roundMainWord).toLowerCase()){
+      // intentar tomar otra palabra del pool distinta
+      const poolOptions = poolWords.filter(w=> String(w).toLowerCase() !== String(roundMainWord).toLowerCase());
+      safeRelated = poolOptions.length ? pickFrom(poolOptions) : (roundMainWord + " (relacionado)");
+    }
+    impostorIndices.forEach(i => roles[i] = safeRelated);
+  } else {
+    // modo pregunta: impostores ven '?'
+    impostorIndices.forEach(i => roles[i] = "?");
+  }
+
+  currentTurn = 0;
+  wordCard.style.display = "none";
+  wordCard.dataset.player = "";
+  nextRoundBtn.style.display = "none";
+  voteResult.innerHTML = "";
+
+  renderPlayers();
+  renderVotes();
+}
+
+/* ---------- pickMainWord wrapper (uses poolWords and lastWords) ---------- */
+function pickMainWord(){
+  if(!Array.isArray(poolWords) || poolWords.length===0) return "";
+  let tries=0, w;
+  do {
+    w = pickFrom(poolWords);
+    tries++;
+    if(tries>80) break;
+  } while(lastWords.includes(w));
+  lastWords.push(w);
+  if(lastWords.length>5) lastWords.shift();
+  // guardamos categoría
+  currentCategoryOfMain = findCategoryOfWord(w);
+  return w;
+}
+
+/* ---------- Helpers ---------- */
+function pickFrom(a){ return a[Math.floor(Math.random()*a.length)]; }
+
+/* ---------- init defaults ---------- */
+(function init(){
+  document.getElementById("playersSelect").value = 4;
+  document.getElementById("impostorsSelect").value = 1;
+})();
+</script>
+
+</body>
+</html>
